@@ -1,0 +1,6 @@
+CompileFlags:
+  Add: [
+    "-I/home/jstifter/code/embedded/stm32/libraries/CMSIS/Device/ST/STM32F4/Include",
+    "-I/home/jstifter/code/embedded/stm32/libraries/CMSIS/CMSIS/Core/Include",
+    "-I/home/jstifter/code/embedded/stm32/projects/autonomous_drone/src/drivers"
+  ]
