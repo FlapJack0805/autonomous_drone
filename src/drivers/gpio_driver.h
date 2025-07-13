@@ -3,6 +3,7 @@
 #define IO_DRIVER_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 
 
@@ -153,6 +154,7 @@ struct io_config
 };
 
 
+//io definitions
 void io_init(void);
 void io_configure(io_e io, const struct io_config *config);
 void io_get_current_config(io_e io, struct io_config *current_config);
@@ -163,5 +165,15 @@ void io_set_ospeed(io_e io, io_ospeed_e ospeed);
 void io_set_resistor(io_e io, io_resistor_e resistor);
 void io_set_output(io_e io, io_output_e output);
 io_input_e io_get_input(io_e io);
+
+
+//interrup definitions
+typedef void (*isr_function)(void);
+void interrupt_init(void);
+void io_configure_interrupt(io_e io, io_trigger_e trigger, uint8_t priority, isr_function isr);
+void io_deconfigure_interrupt(io_e io);
+void io_enable_interrupt(io_e io);
+void io_disable_interrupt(io_e io);
+
 
 #endif

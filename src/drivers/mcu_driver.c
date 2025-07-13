@@ -9,10 +9,7 @@ void _fini(void) {}
 
 void mcu_init()
 {
-	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN; // Enable GPIOA clock
-	volatile uint32_t dummy;
-	dummy = RCC->AHB1ENR;
-	dummy = RCC->AHB1ENR;
 	io_init();
+	interrupt_init();
 }
 
