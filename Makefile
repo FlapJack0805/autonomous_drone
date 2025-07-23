@@ -27,7 +27,8 @@ endif
 OBJECTS=$(STARTUP_FILE) \
  /home/jstifter/code/embedded/stm32/libraries/CMSIS/Device/ST/STM32F4/Source/Templates/system_stm32f4xx.c \
  src/drivers/gpio_driver.c \
- src/drivers/mcu_driver.c
+ src/drivers/mcu_driver.c  \
+ src/drivers/uart_driver.c
 
 # Default target
 all: code.elf
