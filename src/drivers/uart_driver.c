@@ -3,11 +3,12 @@
 #include "stm32f4xx.h"
 #include "system_stm32f4xx.h"
 
-#define BUFFER_SIZE 64
+#define BUFFER_CAPACITY 64
 
-static uint8_t uart_buffer[BUFFER_SIZE];
-static uint8_t buffer_head;
-static uint8_t buffer_tail;
+static uint8_t uart_buffer[BUFFER_CAPACITY];
+static uint8_t buffer_head = 0;
+static uint8_t buffer_tail = 0;
+static uint8_t buffer_size = 0;
 
 
 /*
@@ -23,29 +24,19 @@ void uart_init(void)
 }
 
 
-static void write_byte(char c)
+void _putchar(char c)
 {
-		uint8_t next_idx = (buffer_head + 1) % BUFFER_SIZE;
-		while (next_idx == buffer_tail); //wait until done sending current byte
-		uart_buffer[buffer_head] = c;
-		buffer_head = next_idx;
-		USART1->CR1 |= USART_CR1_TXEIE; //values added to buffer so turn on USART interrupt if not already on
-}
-
-
-/*
- * Writes len bytes into the uart_tx buffer which is implemented as a ring buffer
- * turns on the USART1 interrupt if it isn't already on because after this function
- * there is no chance the buffer is empty because we just added values to it
-*/
-void uart_write(uint8_t len, uint8_t *bytes)
-{
-	for (uint8_t i = 0; i < len; i++)
+	while (buffer_size == BUFFER_CAPACITY);
+	uint8_t next_idx = (buffer_head + 1) % BUFFER_CAPACITY;
+	while (next_idx == buffer_tail); //wait until done sending current byte
+	uart_buffer[buffer_head] = c;
+	buffer_head = next_idx;
+	buffer_size += 1;
+	USART1->CR1 |= USART_CR1_TXEIE; //values added to buffer so turn on USART interrupt if not already on
+	
+	if (c == '\n')
 	{
-		if (bytes[i] == '\n')
-			write_byte('\r');
-
-		write_byte(bytes[i]);
+		_putchar('\r');
 	}
 }
 
@@ -61,7 +52,8 @@ void USART1_IRQHandler(void)
 		if (buffer_head != buffer_tail)
 		{
 			USART1->DR = uart_buffer[buffer_tail];
-			uint8_t buffer_tail = (buffer_tail + 1) % BUFFER_SIZE;
+			uint8_t buffer_tail = (buffer_tail + 1) % BUFFER_CAPACITY;
+			buffer_size -= 1;
 		}
 
 		else // buffer is empty so turn off the interrupt

@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 void uart_init(void);
-void uart_write(uint8_t len, uint8_t *bytes);
+void _putchar(char c);
 
 
 
