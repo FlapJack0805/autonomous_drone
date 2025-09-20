@@ -2,6 +2,7 @@
 #include "stm32f4xx.h"
 #include "system_stm32f4xx.h"
 #include "gpio_driver.h"
+#include "uart_driver.h"
 
 //required to have defined for some reason
 void _init(void) {}
@@ -11,5 +12,6 @@ void mcu_init()
 {
 	io_init();
 	interrupt_init();
+	uart_init();
 }
 

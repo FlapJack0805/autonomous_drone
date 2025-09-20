@@ -17,6 +17,8 @@ ifeq ($(TEST), blink_led)
 	SOURCE_FILE = src/tests/blink_led.c
 else ifeq ($(TEST), gpio_pin_in_out)
 	SOURCE_FILE = src/tests/gpio_pin_in_out.c
+else ifeq ($(TEST), uart_test)
+	SOURCE_FILE = src/tests/uart_tester.c
 else
 	SOURCE_FILE = main.c
 endif

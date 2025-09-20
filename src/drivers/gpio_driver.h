@@ -4,6 +4,8 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "stm32f4xx.h"
+#include "system_stm32f4xx.h"
 
 
 
@@ -154,6 +156,9 @@ struct io_config
 };
 
 
+
+
+
 //io definitions
 void io_init(void);
 void io_configure(io_e io, const struct io_config *config);
@@ -164,6 +169,9 @@ void io_set_otype(io_e io, io_otype_e otype);
 void io_set_ospeed(io_e io, io_ospeed_e ospeed);
 void io_set_resistor(io_e io, io_resistor_e resistor);
 void io_set_output(io_e io, io_output_e output);
+void gpio_set_uart(USART_TypeDef *USARTx);
+void gpio_set_i2c(I2C_TypeDef *I2Cx);
+void gpio_set_spi(SPI_TypeDef *SPIx);
 io_input_e io_get_input(io_e io);
 
 

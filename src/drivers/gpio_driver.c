@@ -1,8 +1,6 @@
 #include "gpio_driver.h"
 
 #include <stdint.h>
-#include "stm32f4xx.h"
-#include "system_stm32f4xx.h"
 #include <stddef.h>
 
 #define IO_PIN_COUNT_PER_PORT (16u)
@@ -15,6 +13,56 @@
     {                                                                                              \
         IO_MODE_OUTPUT, IO_OTYPE_PUSH_PULL, IO_OSPEED_LOW, IO_RESISTOR_NONE, IO_OUTPUT_LOW                             \
     }
+
+#define UART_TX_CONFIG	\
+    {			    \
+        IO_MODE_AF, IO_OTYPE_PUSH_PULL, IO_OSPEED_MEDIUM, IO_RESISTOR_NONE, IO_OUTPUT_LOW	\
+    }
+
+
+#define UART_RX_CONFIG \
+    {	\
+        IO_MODE_AF, \
+        IO_OTYPE_PUSH_PULL, \
+        IO_OSPEED_HIGH, \
+        IO_RESISTOR_PULL_UP, \
+        IO_OUTPUT_LOW \
+    };
+
+//defines SCL and SDA
+//Add your own PU resistors for I2C
+#define I2C_CONFIG \
+{	    \
+        IO_MODE_AF, \
+        IO_OTYPE_OPEN_DRAIN, \
+        IO_OSPEED_HIGH, \
+        IO_RESISTOR_NONE, \
+        IO_OUTPUT_LOW \
+};
+
+
+//defines all pins on SPI asside for CS
+#define SPI_CONFIG \
+{		    \
+        IO_MODE_AF, \
+        IO_OTYPE_PUSH_PULL, \
+        IO_OSPEED_HIGH, \
+        IO_RESISTOR_NONE, \
+        IO_OUTPUT_LOW \
+};
+
+
+#define SPI_CS_CONFIG \
+    {		\
+        IO_MODE_OUTPUT,	    \
+        IO_OTYPE_OPEN_DRAIN, \
+        IO_OSPEED_HIGH, \
+        IO_RESISTOR_NONE,\
+        IO_OUTPUT_LOW \
+    };
+
+
+
 
 #define MODE_REGS_PER_PIN 2
 #define OTYPE_REGS_PER_PIN 1
@@ -51,7 +99,7 @@ static inline uint8_t io_pin_idx(io_e io)
 
 
 //returns a bit offset by the pin index
-static uint8_t io_pin_bit(io_e io)
+static uint16_t io_pin_bit(io_e io)
 {
 	return 1 << io_pin_idx(io);
 }
@@ -117,6 +165,23 @@ static volatile uint32_t *const port_output_regs[IO_PORT_COUNT] = {&GPIOA->ODR, 
 static volatile uint32_t *const port_input_regs[IO_PORT_COUNT] = {&GPIOA->IDR, &GPIOB->IDR, &GPIOC->IDR};
 static volatile uint32_t *const port_interrupt_flag[IO_PORT_COUNT] = {&GPIOA->IDR, &GPIOB->IDR, &GPIOC->IDR};
 static isr_function isr_table[16] = {0};
+static volatile uint32_t *const port_afrl_regs[IO_PORT_COUNT] = {&GPIOA->AFR[0], &GPIOB->AFR[0], &GPIOC->AFR[0]};
+static volatile uint32_t *const port_afrh_regs[IO_PORT_COUNT] = {&GPIOA->AFR[1], &GPIOB->AFR[1], &GPIOC->AFR[1]};
+
+static inline void io_clear_af(io_e io) 
+{
+	const uint8_t port = io_port(io);
+	const uint8_t pin = io_pin_idx(io);
+	if (pin < 8) 
+	{
+		*port_afrl_regs[port] &= ~(0xFu << (pin * 4));
+	} 
+	else 
+	{
+		*port_afrh_regs[port] &= ~(0xFu << ((pin - 8) * 4));
+	}
+}
+
 
 //configure an io pin
 void io_configure(io_e io, const struct io_config *config)
@@ -145,6 +210,7 @@ void io_init(void)
 	for (io_e io = (io_e)PA0; io <= (io_e)PC15; io++)
 	{
 		io_configure(io, &io_initial_configs[io]);
+		io_clear_af(io);
 	}
 
 }
@@ -207,6 +273,139 @@ void io_set_output(io_e io, io_output_e output)
 
 	*port_output_regs[port] &= ~(OUTPUT_MSK << (pin * OUTPUT_REGS_PER_PIN));
 	*port_output_regs[port] |= (output << (pin * OUTPUT_REGS_PER_PIN));
+}
+
+
+static inline void _gpio_set_af(GPIO_TypeDef *port, uint8_t pin, uint8_t af)
+{
+    volatile uint32_t *afr = (pin < 8) ? &port->AFR[0] : &port->AFR[1];
+    uint8_t shift = (pin & 7u) * 4u;
+    uint32_t v = *afr;
+    v &= ~(0xFu << shift);
+    v |=  ((uint32_t)af << shift);
+    *afr = v;
+}
+
+/* ========================= UART =========================
+ * AF numbers:
+ *   USART1/2 -> AF7
+ *   USART6     -> AF8
+ *
+ * Default pin maps chosen below (adjust if you use alternates):
+ *   USART1: PA9 (TX),  PA10 (RX)          [AF7]
+ *   USART2: PA2 (TX),  PA3  (RX)          [AF7]
+ *   USART6: PC6 (TX),  PC7  (RX)          [AF8]
+ */
+void gpio_set_uart(USART_TypeDef *USARTx)
+{
+    struct io_config tx_config = UART_TX_CONFIG;
+    struct io_config rx_config = UART_RX_CONFIG;
+
+    if (USARTx == USART1) 
+    {
+	io_configure((io_e)PA9, &tx_config);
+	io_configure((io_e)PA10, &rx_config);
+        _gpio_set_af(GPIOA, 9,  7); // TX
+        _gpio_set_af(GPIOA, 10, 7); // RX
+    } 
+    else if (USARTx == USART2) 
+    {
+	io_configure((io_e)PA2, &tx_config);
+	io_configure((io_e)PA3, &rx_config);
+        _gpio_set_af(GPIOA, 2,  7); // TX
+        _gpio_set_af(GPIOA, 3,  7); // RX
+    } 
+    else if (USARTx == USART6) 
+    {
+	io_configure((io_e)PC6, &tx_config);
+	io_configure((io_e)PC7, &rx_config);
+        _gpio_set_af(GPIOC, 6,  8); // TX
+        _gpio_set_af(GPIOC, 7,  8); // RX
+    }
+    // else: unsupported instance for this part
+}
+
+/* ========================= I2C =========================
+ * AF numbers: I2C1/2/3 -> AF4
+ *
+ * Default pin maps (common on F401/Nucleo):
+ *   I2C1: PB8 (SCL), PB9 (SDA)
+ *   I2C2: PB10(SCL), PB11(SDA)
+ *   I2C3: PA8 (SCL), PC9 (SDA)
+ */
+void gpio_set_i2c(I2C_TypeDef *I2Cx)
+{
+    struct io_config i2c_config = I2C_CONFIG;
+
+    if (I2Cx == I2C1) 
+    {
+	io_configure((io_e)PB8, &i2c_config);
+	io_configure((io_e)PB9, &i2c_config);
+        _gpio_set_af(GPIOB, 8, 4); // SCL
+        _gpio_set_af(GPIOB, 9, 4); // SDA
+    } 
+    else if (I2Cx == I2C2) 
+    {
+	io_configure((io_e)PB10, &i2c_config);
+	io_configure((io_e)PB11, &i2c_config);
+        _gpio_set_af(GPIOB, 10, 4); // SCL
+        _gpio_set_af(GPIOB, 11, 4); // SDA
+    } 
+    else if (I2Cx == I2C3) 
+    {
+	io_configure((io_e)PA8, &i2c_config);
+	io_configure((io_e)PC9, &i2c_config);
+        _gpio_set_af(GPIOA, 8, 4); // SCL
+        _gpio_set_af(GPIOC, 9, 4); // SDA
+    }
+}
+
+/* ========================= SPI =========================
+ * AF numbers:
+ *   SPI1/SPI2 -> AF5
+ *   SPI3      -> AF6   (on PB3/4/5 mapping below)
+ *
+ * Default pin maps:
+ *   SPI1: PA5 (SCK),  PA6 (MISO), PA7  (MOSI), PA4  (NSS)
+ *   SPI2: PB13(SCK),  PB14(MISO), PB15 (MOSI), PB12 (NSS)
+ *   SPI3: PB3 (SCK),  PB4 (MISO), PB5  (MOSI), PA15 (NSS)
+ *
+ * Note: If you use software chip-select, you can ignore the NSS AF
+ * and leave that pin as a regular GPIO output instead.
+ */
+void gpio_set_spi(SPI_TypeDef *SPIx)
+{
+    struct io_config spi_config = SPI_CONFIG; //config for all pins but CS pin
+    struct io_config spi_cs_config = SPI_CS_CONFIG;
+
+    if (SPIx == SPI1) {
+	io_configure((io_e)PA5, &spi_config); //SCK
+	io_configure((io_e)PA6, &spi_config); //MISO
+	io_configure((io_e)PA7, &spi_config); //MOSI
+	io_configure((io_e)PA4, &spi_cs_config); //CS
+        _gpio_set_af(GPIOA, 5, 5);  // SCK
+        _gpio_set_af(GPIOA, 6, 5);  // MISO
+        _gpio_set_af(GPIOA, 7, 5);  // MOSI
+        _gpio_set_af(GPIOA, 4, 5);  // NSS (optional)
+    } else if (SPIx == SPI2) {
+	io_configure((io_e)PB13, &spi_config); //SCK
+	io_configure((io_e)PB14, &spi_config); //MISO
+	io_configure((io_e)PB15, &spi_config); //MOSI
+	io_configure((io_e)PB12, &spi_cs_config); //CS
+        _gpio_set_af(GPIOB, 13, 5); // SCK
+        _gpio_set_af(GPIOB, 14, 5); // MISO
+        _gpio_set_af(GPIOB, 15, 5); // MOSI
+        _gpio_set_af(GPIOB, 12, 5); // NSS (optional)
+    } else if (SPIx == SPI3) {
+	io_configure((io_e)PB3, &spi_config); //SCK
+	io_configure((io_e)PB4, &spi_config); //MISO
+	io_configure((io_e)PB5, &spi_config); //MOSI
+	io_configure((io_e)PA15, &spi_cs_config); //CS
+        _gpio_set_af(GPIOB, 3, 6);  // SCK
+        _gpio_set_af(GPIOB, 4, 6);  // MISO
+        _gpio_set_af(GPIOB, 5, 6);  // MOSI
+        _gpio_set_af(GPIOA, 15, 6); // NSS (optional)
+    }
 }
 
 

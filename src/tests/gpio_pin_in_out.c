@@ -12,22 +12,32 @@ int main(void) {
         .mode = IO_MODE_INPUT,
         .otype = IO_OTYPE_PUSH_PULL,
         .ospeed = IO_OSPEED_LOW,
-        .resistor = IO_RESISTOR_PULL_DOWN,
+        .resistor = IO_RESISTOR_PULL_UP,
         .output = IO_OUTPUT_LOW
     };
 
-    io_configure((io_e)PA2, &input_config);
+    struct io_config output_config = 
+    {
+        .mode = IO_MODE_OUTPUT,
+        .otype = IO_OTYPE_PUSH_PULL,
+        .ospeed = IO_OSPEED_LOW,
+        .resistor = IO_RESISTOR_NONE,
+        .output = IO_OUTPUT_LOW
+    };
+
+    io_configure((io_e)PC13, &input_config);
+    io_configure((io_e)PA10, &output_config);
 
     while (1)
     {
-        if (io_get_input((io_e)PA2) == IO_INPUT_HIGH)
+        if (io_get_input((io_e)PC13) == IO_INPUT_HIGH)
         {
-            io_set_output(GREEN_LED, IO_OUTPUT_HIGH);
+            io_set_output((io_e)PA10, IO_OUTPUT_HIGH);
         }
 
         else 
         {
-            io_set_output(GREEN_LED, IO_OUTPUT_LOW);
+            io_set_output((io_e)PA10, IO_OUTPUT_LOW);
         }
     }
 
