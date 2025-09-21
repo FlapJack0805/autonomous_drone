@@ -52,18 +52,6 @@
 };
 
 
-#define SPI_CS_CONFIG \
-    {		\
-        IO_MODE_OUTPUT,	    \
-        IO_OTYPE_OPEN_DRAIN, \
-        IO_OSPEED_HIGH, \
-        IO_RESISTOR_NONE,\
-        IO_OUTPUT_LOW \
-    };
-
-
-
-
 #define MODE_REGS_PER_PIN 2
 #define OTYPE_REGS_PER_PIN 1
 #define OSPEED_REGS_PER_PIN 2
@@ -366,12 +354,10 @@ void gpio_set_i2c(I2C_TypeDef *I2Cx)
  *   SPI3      -> AF6   (on PB3/4/5 mapping below)
  *
  * Default pin maps:
- *   SPI1: PA5 (SCK),  PA6 (MISO), PA7  (MOSI), PA4  (NSS)
- *   SPI2: PB13(SCK),  PB14(MISO), PB15 (MOSI), PB12 (NSS)
- *   SPI3: PB3 (SCK),  PB4 (MISO), PB5  (MOSI), PA15 (NSS)
+ *   SPI1: PA5 (SCK),  PA6 (MISO), PA7  (MOSI)
+ *   SPI2: PB13(SCK),  PB14(MISO), PB15 (MOSI)
+ *   SPI3: PB3 (SCK),  PB4 (MISO), PB5  (MOSI)
  *
- * Note: If you use software chip-select, you can ignore the NSS AF
- * and leave that pin as a regular GPIO output instead.
  */
 void gpio_set_spi(SPI_TypeDef *SPIx)
 {
@@ -382,29 +368,23 @@ void gpio_set_spi(SPI_TypeDef *SPIx)
 	io_configure((io_e)PA5, &spi_config); //SCK
 	io_configure((io_e)PA6, &spi_config); //MISO
 	io_configure((io_e)PA7, &spi_config); //MOSI
-	io_configure((io_e)PA4, &spi_cs_config); //CS
         _gpio_set_af(GPIOA, 5, 5);  // SCK
         _gpio_set_af(GPIOA, 6, 5);  // MISO
         _gpio_set_af(GPIOA, 7, 5);  // MOSI
-        _gpio_set_af(GPIOA, 4, 5);  // NSS (optional)
     } else if (SPIx == SPI2) {
 	io_configure((io_e)PB13, &spi_config); //SCK
 	io_configure((io_e)PB14, &spi_config); //MISO
 	io_configure((io_e)PB15, &spi_config); //MOSI
-	io_configure((io_e)PB12, &spi_cs_config); //CS
         _gpio_set_af(GPIOB, 13, 5); // SCK
         _gpio_set_af(GPIOB, 14, 5); // MISO
         _gpio_set_af(GPIOB, 15, 5); // MOSI
-        _gpio_set_af(GPIOB, 12, 5); // NSS (optional)
     } else if (SPIx == SPI3) {
 	io_configure((io_e)PB3, &spi_config); //SCK
 	io_configure((io_e)PB4, &spi_config); //MISO
 	io_configure((io_e)PB5, &spi_config); //MOSI
-	io_configure((io_e)PA15, &spi_cs_config); //CS
         _gpio_set_af(GPIOB, 3, 6);  // SCK
         _gpio_set_af(GPIOB, 4, 6);  // MISO
         _gpio_set_af(GPIOB, 5, 6);  // MOSI
-        _gpio_set_af(GPIOA, 15, 6); // NSS (optional)
     }
 }
 
