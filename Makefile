@@ -21,6 +21,8 @@ else ifeq ($(TEST), uart_test)
 	SOURCE_FILE = src/tests/uart_tester.c
 else ifeq ($(TEST), i2c_test)
 	SOURCE_FILE = src/tests/i2c_tester.c
+else ifeq ($(TEST), spi_test)
+	SOURCE_FILE = src/tests/spi_tester.c
 else
 	SOURCE_FILE = main.c
 endif
@@ -34,7 +36,8 @@ OBJECTS=$(STARTUP_FILE) \
  src/drivers/mcu_driver.c  \
  src/drivers/uart_driver.c \
  src/drivers/i2c_driver.c  \
- src/drivers/spi_driver.c
+ src/drivers/spi_driver.c  \
+ src/drivers/pwm_driver.c
 
 # Default target
 all: code.elf

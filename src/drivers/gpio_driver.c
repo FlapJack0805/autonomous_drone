@@ -362,7 +362,6 @@ void gpio_set_i2c(I2C_TypeDef *I2Cx)
 void gpio_set_spi(SPI_TypeDef *SPIx)
 {
     struct io_config spi_config = SPI_CONFIG; //config for all pins but CS pin
-    struct io_config spi_cs_config = SPI_CS_CONFIG;
 
     if (SPIx == SPI1) {
 	io_configure((io_e)PA5, &spi_config); //SCK

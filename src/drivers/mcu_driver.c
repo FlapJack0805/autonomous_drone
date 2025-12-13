@@ -5,6 +5,7 @@
 #include "uart_driver.h"
 #include "i2c_driver.h"
 #include "spi_driver.h"
+#include "pwm_driver.h"
 
 //required to have defined for some reason
 void _init(void) {}
@@ -17,5 +18,7 @@ void mcu_init()
 	uart_init();
 	i2c_init();
 	spi_init();
+	pwm_init();
 }
+
 
