@@ -19,10 +19,10 @@ typedef enum
 
 typedef enum
 {
-    IO_UNUSED_0 = PA0,
-    IO_UNUSED_1 = PA1,
+    MOTOR_0     = PA0,
+    MOTOR_1     = PA1,
     IO_UNUSED_2 = PA2,
-    IO_UNUSED_3 = PA3,
+    MOTOR_3     = PA3,
     IO_UNUSED_4 = PA4,
     GREEN_LED = PA5,
     IO_UNUSED_6 = PA6,
@@ -31,8 +31,8 @@ typedef enum
     IO_UNUSED_9 = PA9,
     IO_UNUSED_10 = PA10,
     IO_UNUSED_11 = PA11,
-    IO_UNUSED_12 = PA12,
-    BOOT0 = PA13,
+    BOOT0 = PA12,
+    IO_UNUSED_13 = PA13,
     IO_UNUSED_14 = PA14,
     IO_UNUSED_15 = PA15,
     IO_UNUSED_16 = PB0,
@@ -45,7 +45,7 @@ typedef enum
     IO_UNUSED_23 = PB7,
     IO_UNUSED_24 = PB8,
     IO_UNUSED_25 = PB9,
-    IO_UNUSED_26 = PB10,
+    MOTOR_2      = PB10,
     IO_UNUSED_27 = PB11,
     IO_UNUSED_28 = PB12,
     IO_UNUSED_29 = PB13,

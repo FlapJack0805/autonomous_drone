@@ -4,19 +4,75 @@
 #include "i2c_driver.h"
 #include <stdio.h>
 
+#define BUFFER_SIZE 20
 
-static struct 
+
+struct i2c_transfer_info
 {
-    volatile i2c_phase_e phase;
-    i2c_transfer_t transfer;
+	volatile i2c_phase_e phase;
+	i2c_transfer_t transfer;
 
-    uint16_t write_idx; //index for when we are iterating through write buffer
-    uint16_t bytes_remaining;   // how many bytes left to read
-} i2c1_transfer_info;
+	uint16_t write_idx; //index for when we are iterating through write buffer
+	uint16_t bytes_remaining;   // how many bytes left to read
+
+	TaskHandle_t waiting_task;
+};
+
+static struct
+{
+	struct i2c_transfer_info i2c_messages[BUFFER_SIZE];
+	uint8_t head;
+	uint8_t tail;
+	uint8_t num_i2c_messages;
+} i2c_queue;
+
+static struct i2c_transfer_info curr_i2c_transfer;
+SemaphoreHandle_t i2c_semaphore;
+
+static int push_i2c_queue(struct i2c_transfer_info *new_i2c_transfer)
+{
+	xSemaphoreTake(i2c_semaphore, portMAX_DELAY);
+	if (i2c_queue.num_i2c_messages == BUFFER_SIZE)
+	{
+		xSemaphoreGive(i2c_semaphore);
+		return 0;
+	}
+	i2c_queue.i2c_messages[i2c_queue.head] = *new_i2c_transfer;
+
+	i2c_queue.head = (i2c_queue.head + 1) % BUFFER_SIZE;
+	++i2c_queue.num_i2c_messages;
+
+	xSemaphoreGive(i2c_semaphore);
+	return 1;
+}
+
+
+
+
+//NOTE: Check to make sure there is something in the queue before calling this
+static struct i2c_transfer_info pop_i2c_queue(void)
+{
+	xSemaphoreTake(i2c_semaphore, portMAX_DELAY);
+	struct i2c_transfer_info next_i2c_transfer = i2c_queue.i2c_messages[i2c_queue.tail];
+	--i2c_queue.num_i2c_messages;
+	i2c_queue.tail = (i2c_queue.tail + 1) % BUFFER_SIZE;
+
+	xSemaphoreGive(i2c_semaphore);
+	return next_i2c_transfer;
+}
+
+
+static bool i2c_queue_empty_isr(void)
+{
+	bool is_empty = i2c_queue.num_i2c_messages == 0;
+	return is_empty;
+}
+
 
 
 void i2c_init(void)
 {
+	gpio_set_i2c(I2C1);
 	RCC->APB1ENR |= RCC_APB1ENR_I2C1EN;
 	I2C1->CR1 &= ~I2C_CR1_PE;
 	I2C1->CR2 |= I2C_CR2_ITEVTEN;
@@ -32,7 +88,10 @@ void i2c_init(void)
 	I2C1->CR1 |= I2C_CR1_PE | I2C_CR1_ACK;
 	NVIC_EnableIRQ(I2C1_EV_IRQn);
 	NVIC_EnableIRQ(I2C1_ER_IRQn);
-	i2c1_transfer_info.phase = I2C_IDLE;
+	curr_i2c_transfer.phase = I2C_IDLE;
+
+	i2c_semaphore = xSemaphoreCreateBinary();
+	xSemaphoreGive(i2c_semaphore);
 }
 
 
@@ -70,8 +129,6 @@ static inline void clear_addr(void)
 	(void)I2C1->SR1; 
 	(void)I2C1->SR2; 
 }
-
-
 
 /*
 	* writes the 7 bit address to the DR shifted one to the right so it starts
@@ -115,44 +172,104 @@ void i2c_read(uint8_t addr, uint8_t *data, uint8_t data_len)
 */
 
 
+// This function is called to start the next i2c transfer
+// It simply pops from the i2c queue, and sends the start condition
+static void start_next_transfer(void)
+{
+	curr_i2c_transfer = pop_i2c_queue();
+	send_start_condition();
+}
+
+
 int i2c_transfer(uint8_t addr7, const uint8_t *transfer_buf, uint16_t transfer_buf_len, uint8_t *recieve_buf, uint16_t recieve_buf_len)
 {
-	i2c1_transfer_info.transfer.addr7 = addr7;
-	i2c1_transfer_info.write_idx = 0;
-	i2c1_transfer_info.transfer.done = 0;
-	i2c1_transfer_info.bytes_remaining = recieve_buf_len;
+	struct i2c_transfer_info new_i2c_transfer;
+	new_i2c_transfer.transfer.addr7 = addr7;
+	new_i2c_transfer.write_idx = 0;
+	new_i2c_transfer.transfer.done = 0;
+	new_i2c_transfer.bytes_remaining = recieve_buf_len;
+	new_i2c_transfer.waiting_task = xTaskGetCurrentTaskHandle();
 
 	if (recieve_buf_len != 0)
 	{
-		i2c1_transfer_info.transfer.recieve_buf = recieve_buf;
-		i2c1_transfer_info.phase = I2C_PHASE_ADDR_RX;
+		new_i2c_transfer.transfer.recieve_buf = recieve_buf;
+		new_i2c_transfer.phase = I2C_PHASE_ADDR_RX;
 	}
+
 	else
 	{
-		i2c1_transfer_info.transfer.recieve_buf = NULL;
+		new_i2c_transfer.transfer.recieve_buf = NULL;
 	}
 
 	if (transfer_buf_len != 0)
 	{
-		i2c1_transfer_info.transfer.transfer_buf = transfer_buf;
-		i2c1_transfer_info.phase = I2C_PHASE_ADDR_TX;
+		new_i2c_transfer.transfer.transfer_buf = transfer_buf;
+		new_i2c_transfer.phase = I2C_PHASE_ADDR_TX;
 	}
+
 	else
 	{
-		i2c1_transfer_info.transfer.transfer_buf = NULL;
+		new_i2c_transfer.transfer.transfer_buf = NULL;
 	}
 
 	if (recieve_buf_len == 0 && transfer_buf_len == 0)
 	{
-		i2c1_transfer_info.transfer.done = 1;
+		new_i2c_transfer.transfer.done = 1;
 		return 0;
 	}
 
-	i2c1_transfer_info.transfer.transfer_buf_len = transfer_buf_len;
-	i2c1_transfer_info.transfer.recieve_buf_len = recieve_buf_len;
+	new_i2c_transfer.transfer.transfer_buf_len = transfer_buf_len;
+	new_i2c_transfer.transfer.recieve_buf_len = recieve_buf_len;
 
-	send_start_condition();
-	return 0;
+	if (push_i2c_queue(&new_i2c_transfer) == 0)
+	{
+		return I2C_BUFFER_FULL;
+	}
+
+	taskENTER_CRITICAL();
+	if (curr_i2c_transfer.phase == I2C_IDLE)
+	{
+		start_next_transfer();
+	}
+	taskEXIT_CRITICAL();
+
+
+	uint32_t transfer_result;
+
+	if (xTaskNotifyWait(0, 0xFFFFFFFF, &transfer_result, pdMS_TO_TICKS(100)) == 0)
+	{
+		xTaskNotifyStateClear(NULL); // The ISR is still going while this is called so this will stop us from getting a late notification
+		return I2C_TIMEOUT;
+	}
+
+	// At this point curr_i2c_transfer could have been overwritten so make sure to use new_i2c_transfer instead even though it's kind of unintuative
+	if ((int32_t)transfer_result == -1)
+	{
+		return I2C_ERROR;
+	}
+
+	return I2C_OK;
+}
+
+
+static inline void end_transfer(void)
+{
+	TaskHandle_t task_to_wake = curr_i2c_transfer.waiting_task; // We need to do this because start_next_transfer will overwrite curr_i2c_transfer
+	int finished_transfer_status = curr_i2c_transfer.transfer.done;
+
+	if (!i2c_queue_empty_isr())
+	{
+		start_next_transfer();
+	}
+
+	BaseType_t woken_task = pdFALSE;
+	xTaskNotifyFromISR(
+	    task_to_wake,
+	    (uint32_t)finished_transfer_status,
+	    eSetValueWithOverwrite,
+	    &woken_task
+	);
+	portYIELD_FROM_ISR(woken_task);
 }
 
 
@@ -163,18 +280,19 @@ void I2C1_EV_IRQHandler(void)
 	//start bit just sent, send address now
 	if (I2C1->SR1 & I2C_SR1_SB)
 	{
-		if (i2c1_transfer_info.phase == I2C_PHASE_ADDR_TX)
+		//if (curr_i2c_transfer.transfer.transfer_buf_len > 0)
+		if (curr_i2c_transfer.phase == I2C_PHASE_ADDR_TX)
 		{
-			send_addr(i2c1_transfer_info.transfer.addr7, 1);
+			send_addr(curr_i2c_transfer.transfer.addr7, 1);
 		}
 
 		else
 		{
-			if (i2c1_transfer_info.transfer.recieve_buf_len == 1)
+			if (curr_i2c_transfer.transfer.recieve_buf_len == 1)
 			{
 				I2C1->CR1 &= ~I2C_CR1_ACK; //turn off ack bit because there's only one byte to read in and it should already be in the line
 			}
-			else if (i2c1_transfer_info.transfer.recieve_buf_len == 2)
+			else if (curr_i2c_transfer.transfer.recieve_buf_len == 2)
 			{
 				I2C1->CR1 |= I2C_CR1_POS; //make the ack bit stop after reading the next bit in instread of after the current one
 				I2C1->CR1 &= ~I2C_CR1_ACK; //turn off ack bit because there's only one byte to read in and it should already be in the line
@@ -183,125 +301,149 @@ void I2C1_EV_IRQHandler(void)
 			{
 				I2C1->CR1 |= I2C_CR1_ACK; //Turn ack bit on so we continue getting more bytes after the ones in the line
 			}
-			send_addr(i2c1_transfer_info.transfer.addr7, 0);
+			send_addr(curr_i2c_transfer.transfer.addr7, 0);
 		}
-		return;
+		//return;
 	}
 
 	// addr bit just sen so now get pipeline reading to rx/tx data
 	if (I2C1->SR1 & I2C_SR1_ADDR)
 	{
 		clear_addr();
-		if (i2c1_transfer_info.phase == I2C_PHASE_ADDR_TX)
+		if (curr_i2c_transfer.phase == I2C_PHASE_ADDR_TX)
 		{
-			i2c1_transfer_info.phase = I2C_PHASE_TX;
+			curr_i2c_transfer.phase = I2C_PHASE_TX;
 			return;
 		}
 
-		if (i2c1_transfer_info.phase == I2C_PHASE_ADDR_RX)
+		if (curr_i2c_transfer.phase == I2C_PHASE_ADDR_RX)
 		{
-			if (i2c1_transfer_info.transfer.recieve_buf_len == 1)
+			if (curr_i2c_transfer.transfer.recieve_buf_len == 1)
 			{
-				i2c1_transfer_info.phase = I2C_PHASE_RX_LAST1;
+				curr_i2c_transfer.phase = I2C_PHASE_RX_RECIEVE_1;
 				send_stop_condition(); // only byte has already been read in so we can stop
 			}
-			else if (i2c1_transfer_info.transfer.recieve_buf_len == 2)
+			else if (curr_i2c_transfer.transfer.recieve_buf_len == 2)
 			{
-				i2c1_transfer_info.phase = I2C_PHASE_RX_LAST2;
+				curr_i2c_transfer.phase = I2C_PHASE_RX_RECIEVE_2;
 			}
 			// if 2 bytes in recieve buf do nothing right now and handle it below
 			else
 			{
-				i2c1_transfer_info.phase = I2C_PHASE_RX;
+				curr_i2c_transfer.phase = I2C_PHASE_RX;
 			}
 		}
 		return;
 	}
 
-	if (i2c1_transfer_info.phase == I2C_PHASE_TX)
+	if (curr_i2c_transfer.phase == I2C_PHASE_TX)
 	{
 		if (data_register_empty())
 		{
-			if (i2c1_transfer_info.transfer.transfer_buf_len > i2c1_transfer_info.write_idx && data_register_empty())
+			if (curr_i2c_transfer.transfer.transfer_buf_len > curr_i2c_transfer.write_idx && data_register_empty())
 			{
-				I2C1->DR = i2c1_transfer_info.transfer.transfer_buf[i2c1_transfer_info.write_idx];
-				i2c1_transfer_info.write_idx++;
+				I2C1->DR = curr_i2c_transfer.transfer.transfer_buf[curr_i2c_transfer.write_idx];
+				curr_i2c_transfer.write_idx++;
 			}
 		}
 
-		if (byte_transfer_finished())
+		if (byte_transfer_finished() && curr_i2c_transfer.write_idx == curr_i2c_transfer.transfer.transfer_buf_len)
 		{
-			if (i2c1_transfer_info.transfer.recieve_buf_len != 0)
+			if (curr_i2c_transfer.transfer.recieve_buf_len != 0)
 			{
-				i2c1_transfer_info.phase = I2C_PHASE_ADDR_RX;
+				curr_i2c_transfer.phase = I2C_PHASE_ADDR_RX;
 				send_start_condition();
 			}
 			else
 			{
 				send_stop_condition();
-				i2c1_transfer_info.phase = I2C_IDLE;
-				i2c1_transfer_info.transfer.done = 1;
+				curr_i2c_transfer.phase = I2C_IDLE;
+				curr_i2c_transfer.transfer.done = 1;
+
+				end_transfer();
 			}
 		}
 	}
 
-	if (i2c1_transfer_info.phase == I2C_PHASE_RX)
+	if (curr_i2c_transfer.phase == I2C_PHASE_RX)
 	{
-		while ((data_register_not_empty()) && (i2c1_transfer_info.bytes_remaining > 3))
+		while ((data_register_not_empty()) && (curr_i2c_transfer.bytes_remaining > 3))
 		{
-			*i2c1_transfer_info.transfer.recieve_buf = I2C1->DR;
-			i2c1_transfer_info.transfer.recieve_buf++;
-			i2c1_transfer_info.bytes_remaining--;
+			*curr_i2c_transfer.transfer.recieve_buf = I2C1->DR;
+			curr_i2c_transfer.transfer.recieve_buf++;
+			curr_i2c_transfer.bytes_remaining--;
 		}
 
-		if ((i2c1_transfer_info.bytes_remaining == 3) && (byte_transfer_finished()))
+		if ((curr_i2c_transfer.bytes_remaining == 3) && (byte_transfer_finished()))
 		{
 			I2C1->CR1 &= ~I2C_CR1_ACK;
-			*i2c1_transfer_info.transfer.recieve_buf = I2C1->DR;
-			i2c1_transfer_info.transfer.recieve_buf++;
-			i2c1_transfer_info.bytes_remaining--;
-			send_stop_condition();
-			i2c1_transfer_info.phase = I2C_PHASE_RX_LAST2;
+			*curr_i2c_transfer.transfer.recieve_buf = I2C1->DR;
+			curr_i2c_transfer.transfer.recieve_buf++;
+			curr_i2c_transfer.bytes_remaining--;
+			curr_i2c_transfer.phase = I2C_PHASE_RX_LAST2;
 		}
 
 	}
 
-	if ((i2c1_transfer_info.phase == I2C_PHASE_RX_LAST2) && (byte_transfer_finished()))
+	if ((curr_i2c_transfer.phase == I2C_PHASE_RX_LAST2) && (byte_transfer_finished()))
 	{
-		if (!byte_transfer_finished())
-		{
-			return;
-		}
 		send_stop_condition();
-		if (data_register_not_empty())
+
+		// Recieve the first byte
+		*curr_i2c_transfer.transfer.recieve_buf = I2C1->DR;
+		curr_i2c_transfer.transfer.recieve_buf++;
+
+		// Recieve the second byte
+		*curr_i2c_transfer.transfer.recieve_buf = I2C1->DR;
+		curr_i2c_transfer.transfer.recieve_buf++;
+
+		I2C1->CR1 |= I2C_CR1_ACK;
+		I2C1->CR1 &= ~I2C_CR1_POS;
+
+		curr_i2c_transfer.transfer.done = 1;
+		curr_i2c_transfer.phase = I2C_IDLE;
+
+		end_transfer();
+	}
+
+	if (curr_i2c_transfer.phase == I2C_PHASE_RX_RECIEVE_2)
+	{
+		if (byte_transfer_finished())
 		{
-			*i2c1_transfer_info.transfer.recieve_buf = I2C1->DR;
-			i2c1_transfer_info.transfer.recieve_buf++;
-			if (data_register_not_empty())
-			{
-				*i2c1_transfer_info.transfer.recieve_buf = I2C1->DR;
-				i2c1_transfer_info.transfer.recieve_buf++;
-				I2C1->CR1 |= I2C_CR1_ACK;
-				I2C1->CR1 &= ~I2C_CR1_POS;
-				i2c1_transfer_info.transfer.done = 1;
-				i2c1_transfer_info.phase = I2C_IDLE;
-			}
+			send_stop_condition();
+
+			// Recieve byte 1
+			*curr_i2c_transfer.transfer.recieve_buf = I2C1->DR;
+			++curr_i2c_transfer.transfer.recieve_buf;
+
+			// Recieve byte 2
+			*curr_i2c_transfer.transfer.recieve_buf = I2C1->DR;
+			++curr_i2c_transfer.transfer.recieve_buf;
+
+			I2C1->CR1 |= I2C_CR1_ACK;
+			I2C1->CR1 &= ~I2C_CR1_POS;
+
+			curr_i2c_transfer.transfer.done = 1;
+			curr_i2c_transfer.phase = I2C_IDLE;
+
+			end_transfer();
 		}
 	}
 
-	if (i2c1_transfer_info.phase == I2C_PHASE_RX_LAST1)
+	if (curr_i2c_transfer.phase == I2C_PHASE_RX_RECIEVE_1)
 	{
 		if (data_register_not_empty())
 		{
-			*i2c1_transfer_info.transfer.recieve_buf = I2C1->DR;
-			i2c1_transfer_info.transfer.recieve_buf++;
+			*curr_i2c_transfer.transfer.recieve_buf = I2C1->DR;
+			++curr_i2c_transfer.transfer.recieve_buf;
 			I2C1->CR1 |= I2C_CR1_ACK;
-			i2c1_transfer_info.transfer.done = 1;
-			i2c1_transfer_info.phase = I2C_IDLE;
+			curr_i2c_transfer.transfer.done = 1;
+			curr_i2c_transfer.phase = I2C_IDLE;
+
+			end_transfer();
 			return;
 		}
 	}
-
 }
 
 
@@ -316,6 +458,8 @@ void I2C1_ER_IRQHandler(void)
 	if (sr1 & I2C_SR1_TIMEOUT)I2C1->SR1 &= ~I2C_SR1_TIMEOUT;
 
 	send_stop_condition();
-	i2c1_transfer_info.transfer.done = -1;
-	i2c1_transfer_info.phase = I2C_IDLE;
+	curr_i2c_transfer.transfer.done = -1;
+	curr_i2c_transfer.phase = I2C_IDLE;
+
+	end_transfer();
 }
